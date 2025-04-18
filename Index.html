@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Procedural Platformer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden; /* Hide scrollbars */
+            background-color: white; /* Fallback background color */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh; /* Full viewport height */
+            width: 100vw; /* Full viewport width */
+            position: relative; /* Needed for absolute positioning of counter and messages */
+        }
+        canvas {
+            display: block; /* Remove extra space below canvas */
+            /* Background will be drawn on canvas, no need for CSS background */
+            /* border: 1px solid black; */ /* Optional border */
+            width: 100%;
+            height: 100%;
+            cursor: pointer; /* Indicate it's clickable to start */
+        }
+        #winCounter {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            font-family: 'Press Start 2P', cursive; /* Apply pixelated font */
+            font-size: 20px;
+            color: white; /* Change text color to white */
+            z-index: 10; /* Ensure it's above the canvas */
+            /* Add text shadow for better readability on varying backgrounds */
+            text-shadow: 2px 2px black;
+            /* Initial state for animation */
+            transform: scale(1);
+        }
+         #messageArea {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-family: 'Press Start 2P', cursive; /* Apply pixelated font */
+            font-size: 20px;
+            color: white; /* Change text color to white */
+            z-index: 10; /* Ensure it's above the canvas */
+             /* Add text shadow for better readability on varying backgrounds */
+            text-shadow: 2px 2px black;
+            /* Initial state for animation */
+            opacity: 0; /* Start hidden */
+            transform: scale(1); /* Start at normal size */
+        }
+
+        /* Keyframes for scaling and fading animation (for messages) */
+        @keyframes scale-and-fade {
+            0% {
+                opacity: 1;
+                transform: scale(1); /* Start at normal size */
+            }
+            /* Spike up instantly */
+            1% {
+                 transform: scale(1.2);
+            }
+            /* Hold spike and maintain full opacity */
+            50% {
+                transform: scale(1.2);
+                opacity: 1;
+            }
+            /* Ease back down and fade out simultaneously */
+            100% {
+                opacity: 0; /* Fade out completely */
+                transform: scale(1); /* Ease back down to normal size */
+            }
+        }
+
+
+         /* Keyframes for scaling only animation (for win counter) */
+        @keyframes scale-only {
+            0% {
+                transform: scale(1); /* Start at normal size */
+            }
+            1% {
+                transform: scale(1.2); /* Instantly spike up */
+            }
+             50% {
+                transform: scale(1.2); /* Hold spike */
+            }
+            100% {
+                transform: scale(1); /* Ease back down */
+            }
+        }
+
+
+        /* Class to apply the scale and fade animation */
+        .scale-and-fade-message {
+            animation: scale-and-fade 0.5s ease-out forwards; /* Changed duration to 0.5s */
+        }
+
+         /* Class to apply the scale only animation */
+        .scale-only-counter {
+            animation: scale-only 0.5s ease-out forwards; /* 0.5s duration */
+        }
+
+
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+    <div id="winCounter">Wins: 0</div>
+    <div id="messageArea"></div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const winCounterElement = document.getElementById('winCounter');
+        const messageAreaElement = document.getElementById('messageArea');
+
+        // Set canvas dimensions to fill the screen
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // --- Image Loading ---
+        let imagesLoaded = 0;
+        const totalImages = 4; // We now need to load 4 images (background, platform, player, finish)
+
+        const backgroundImage = new Image();
+        // Corrected background image URL
+        backgroundImage.src = 'https://pixeljoint.com/files/icons/full/sky__r1623380481.png';
+        let isBackgroundLoaded = false; // Flag to track if background loaded
+        backgroundImage.onload = () => {
+             isBackgroundLoaded = true;
+             imageLoaded();
+        };
+        backgroundImage.onerror = () => {
+            console.error("Failed to load background image.");
+            isBackgroundLoaded = false; // Ensure flag is false on error
+            imageLoaded(); // Still count as loaded to potentially start game
+        };
+
+
+        const platformImage = new Image();
+        platformImage.src = 'https://opengameart.org/sites/default/files/grass_main_128x128_0.png';
+        platformImage.onload = imageLoaded;
+        platformImage.onerror = () => {
+            console.error("Failed to load platform image.");
+            drawPlatforms = drawRectPlatforms; // Fallback
+            imageLoaded(); // Still count as loaded to potentially start game
+        };
+
+        const playerImage = new Image();
+        playerImage.src = 'https://opengameart.org/sites/default/files/Unbenannt_1.png';
+        playerImage.onload = imageLoaded;
+         playerImage.onerror = () => {
+            console.error("Failed to load player image.");
+            drawPlayer = drawCirclePlayer; // Fallback
+            imageLoaded(); // Still count as loaded to potentially start game
+        };
+
+        const finishImage = new Image();
+        // Corrected finish image URL
+        finishImage.src = 'https://i.ibb.co/gbywcv6R/pixil-frame-0.png';
+        finishImage.onload = imageLoaded;
+         finishImage.onerror = () => {
+            console.error("Failed to load finish image.");
+            drawFinish = drawRectFinish; // Fallback
+            imageLoaded(); // Still count as loaded to potentially start game
+        };
+
+
+        function imageLoaded() {
+            imagesLoaded++;
+            if (imagesLoaded === totalImages) {
+                // All images loaded (or errored with fallback), start the game
+                generateLevel(); // Create the first level
+                gameLoop();      // Start the game loop
+                // Removed playSound(winSound) from here
+            }
+        }
+        // --- End Image Loading ---
+
+        // --- Sound Effects (8-bit) ---
+        // Using 8-bit sound effects from OpenGameArt.org and Kenney.nl
+        // Reverted sound URLs to original OpenGameArt links where they were before spike changes,
+        // except for the level complete sound which uses a different OpenGameArt ding.
+        const jumpSound = new Audio('https://opengameart.org/sites/default/files/sfx-jump.wav'); // Reverted to OpenGameArt
+        jumpSound.volume = 0.3; // Make jump sound quieter
+        const landSound = new Audio('https://opengameart.org/sites/default/files/sfx-land.wav'); // From OpenGameArt.org (kept)
+        landSound.volume = 0.3; // Make land sound quieter
+        // Changed winSound (background music) to a different 8-bit track
+        const winSound = new Audio('https://opengameart.org/sites/default/files/8bit%20attempt.ogg'); // From OpenGameArt.org (kept, background music)
+        winSound.loop = true; // Set the win sound to loop
+        winSound.volume = 0.3; // Make background music quieter
+        const loseSound = new Audio('https://opengameart.org/sites/default/files/vgdeathsound.wav'); // Reverted to OpenGameArt
+        loseSound.volume = 0.3; // Make lose sound quieter
+        // New sound effect for completing a level (using OpenGameArt ding as requested)
+        // We will create a NEW Audio object for this sound each time it's played for reliability.
+        const levelCompleteSoundUrl = 'https://opengameart.org/sites/default/files/sfx_sounds_collect1.wav'; // Store URL
+
+
+        // Added walking sound effect (will be played repeatedly, not looped by the Audio object)
+        const walkSound = new Audio('https://opengameart.org/sites/default/files/sfx-footstep.wav'); // Reverted to OpenGameArt
+        walkSound.volume = 0.3; // Make walking sound quieter
+        // Removed walkSound.loop = true;
+
+        // Variables for controlling repeated walking sound playback
+        let lastFootstepTime = 0; // Timestamp of the last time a footstep sound was played
+        const footstepInterval = 250; // Minimum time in milliseconds between footstep sounds (adjust for desired step rate)
+
+
+        // Function to play a sound effect, resetting it first to allow rapid playback
+        // This function will NOT be used for levelCompleteSound anymore.
+        function playSound(sound) {
+            sound.currentTime = 0; // Rewind to the start
+            sound.play().catch(e => {
+                // Catch and log errors, likely due to browser autoplay policies
+                console.error("Error playing sound:", e);
+                if (e.name) console.error("Error name:", e.name);
+                if (e.message) console.error("Error message:", e.message);
+            });
+        }
+        // --- End Sound Effects ---
+
+
+        // Win Counter (resets on page refresh and when losing)
+        let winCount = 0; // Initialize to 0 on every page load
+        winCounterElement.textContent = 'Wins: ' + winCount;
+
+        // Player properties
+        const playerSize = 15; // This now represents the radius for collision/positioning
+        // The image will be drawn with dimensions related to playerSize * 2
+        let playerX; // Starting X position (will be set after level generation)
+        let playerY; // Starting Y position (will be set after level generation)
+        const playerSpeed = 5;
+        let playerDY = 0; // Delta Y for vertical movement (gravity/jumping)
+        const gravity = 0.5;
+        let isJumping = false;
+        let isFallingThrough = false; // Flag to indicate if player is falling through a platform
+        let wasInAir = false; // Flag to track if the player was in the air in the previous frame
+
+
+        // Key states for continuous movement
+        let isLeftKeyPressed = false;
+        let isRightKeyPressed = false;
+
+        // Platforms
+        const platforms = [];
+
+        // Spikes (removed)
+        // const spikes = [];
+        // const spikeSize = 20;
+        // const spikeProbability = 0.1;
+
+
+        // Grid properties
+        const gridCols = 8; // Number of columns in the grid
+        const gridRows = 6;  // Number of rows in the grid
+        let gridCellWidth;
+        let gridCellHeight;
+        const platformHeight = 30; // Fixed height for platforms
+
+
+        const platformStartProbability = 0.4; // Probability of starting a platform run
+        const platformExtendProbability = 0.6; // Probability of extending an existing platform run
+
+
+        // Finish line properties
+        const finishSize = 40; // Increased size for collision and drawing the image
+        let finishX;
+        let finishY;
+        let finishGridCol;
+        let finishGridRow;
+
+        let spawnGridCol;
+        let spawnGridRow;
+
+        // Function to display messages temporarily with animation
+        function showMessage(message) {
+            messageAreaElement.textContent = message;
+            // Remove and re-add class to re-trigger animation
+            messageAreaElement.classList.remove('scale-and-fade-message');
+            // Use requestAnimationFrame to ensure reflow before re-adding class
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    messageAreaElement.classList.add('scale-and-fade-message');
+                });
+            });
+
+            // Clear the text content after the animation duration (0.5 seconds)
+            setTimeout(() => {
+                messageAreaElement.textContent = '';
+                 messageAreaElement.classList.remove('scale-and-fade-message'); // Clean up class
+            }, 500); // Matches animation duration
+        }
+
+        // Function to trigger the win counter animation
+        function animateWinCounter() {
+             // Remove and re-add class to re-trigger animation
+             winCounterElement.classList.remove('scale-only-counter');
+             requestAnimationFrame(() => {
+                 requestAnimationFrame(() => {
+                     winCounterElement.classList.add('scale-only-counter');
+                 });
+             });
+             // The class will stay on the element after the animation finishes due to forwards fill-mode,
+             // but removing and re-adding it allows the animation to play again.
+        }
+
+
+        // Function to generate random platforms and finish line on a grid (connected tiles)
+        function generateLevel() {
+            // Removed the code that stops and resets the win sound here.
+            // The win sound will now continue looping when a new level is generated.
+
+            platforms.length = 0; // Clear existing platforms
+            // spikes.length = 0; // Clear existing spikes (removed)
+
+            // Calculate grid cell dimensions
+            gridCellWidth = canvas.width / gridCols;
+            gridCellHeight = canvas.height / gridRows;
+
+            // Generate platforms based on the grid (connected tiles)
+            for (let row = 0; row < gridRows; row++) {
+                let currentPlatformX = -1; // Track the start of a potential platform run
+                let currentPlatformCol = -1;
+
+                for (let col = 0; col < gridCols; col++) {
+                    const cellX = col * gridCellWidth;
+                    const cellY = row * gridCellHeight;
+
+                    // If not currently in a platform run, decide if a new one starts
+                    if (currentPlatformX === -1) {
+                        if (Math.random() < platformStartProbability) {
+                            currentPlatformX = cellX;
+                            currentPlatformCol = col;
+                        }
+                    } else {
+                        // Currently in a platform run, decide if it extends
+                        if (Math.random() < platformExtendProbability) {
+                            // Extend the current platform (do nothing, will be added when run ends)
+                        } else {
+                            // End the current platform run
+                            const platformWidth = cellX - currentPlatformX;
+                            // Ensure platform has a minimum width of one cell
+                            if (platformWidth > 0) {
+                                const newPlatform = {
+                                    x: currentPlatformX,
+                                    y: cellY + gridCellHeight - platformHeight, // Place platform at bottom of cell
+                                    width: platformWidth,
+                                    height: platformHeight,
+                                    gridCol: currentPlatformCol,
+                                    gridRow: row // Store grid row of the run
+                                };
+                                platforms.push(newPlatform);
+
+                                // Add spikes on top of this platform segment with a probability (removed)
+                                // if (Math.random() < spikeProbability) {
+                                //      spikes.push({
+                                //           x: newPlatform.x + newPlatform.width / 2 - spikeSize / 2, // Center spike on platform segment
+                                //           y: newPlatform.y - spikeSize, // Place spike just above platform
+                                //           width: spikeSize,
+                                //           height: spikeSize,
+                                //           gridCol: newPlatform.gridCol, // Store grid col of the platform start
+                                //           gridRow: newPlatform.gridRow // Store grid row of the platform
+                                //      });
+                                // }
+                            }
+                            currentPlatformX = -1; // Reset run tracker
+                            currentPlatformCol = -1;
+                        }
+                    }
+                }
+
+                // If a platform run was ongoing at the end of the row, add it
+                if (currentPlatformX !== -1) {
+                    const platformWidth = canvas.width - currentPlatformX;
+                     // Ensure platform has a minimum width
+                     if (platformWidth > 0) {
+                         const newPlatform = {
+                             x: currentPlatformX,
+                             y: row * gridCellHeight + gridCellHeight - platformHeight,
+                             width: platformWidth,
+                             height: platformHeight,
+                             gridCol: currentPlatformCol,
+                             gridRow: row
+                         };
+                         platforms.push(newPlatform);
+
+                          // Add spikes on top of this platform segment with a probability (removed)
+                         // if (Math.random() < spikeProbability) {
+                         //      spikes.push({
+                         //           x: newPlatform.x + newPlatform.width / 2 - spikeSize / 2, // Center spike on platform segment
+                         //           y: newPlatform.y - spikeSize, // Place spike just above platform
+                         //           width: spikeSize,
+                         //           height: spikeSize,
+                         //           gridCol: newPlatform.gridCol, // Store grid col of the platform start
+                         //           gridRow: newPlatform.gridRow // Store grid row of the platform
+                         //      });
+                         // }
+                     }
+                }
+            }
+
+             // Ensure there's at least one platform
+             if (platforms.length === 0) {
+                  // Place a default platform if none were generated randomly
+                  const defaultCol = 0;
+                  const defaultRow = gridRows - 1; // Bottom row
+                  const platformWidth = gridCellWidth * 2; // Default is 2 cells wide
+                  const platformX = defaultCol * gridCellWidth;
+                  const platformY = defaultRow * gridCellHeight + gridCellHeight - platformHeight;
+                   platforms.push({
+                       x: platformX,
+                       y: platformY,
+                       width: platformWidth,
+                       height: platformHeight,
+                       gridCol: defaultCol,
+                       gridRow: defaultRow
+                   });
+             }
+
+
+            // --- Place Spawn Near Top ---
+            const maxSpawnRow = 2; // Consider platforms in rows 0, 1, and 2 for spawning
+            const topPlatforms = platforms.filter(platform => platform.gridRow <= maxSpawnRow);
+
+            let spawnPlatform;
+
+            // Select a random platform from the top platforms, or fallback to any platform if none found at the top
+            if (topPlatforms.length > 0) {
+                spawnPlatform = topPlatforms[Math.floor(Math.random() * topPlatforms.length)];
+                console.log("Spawn placed on a top platform."); // Log placement
+            } else {
+                // Fallback: select any random platform if no platforms found in the top rows
+                console.warn("No platforms found in top rows (0 to " + maxSpawnRow + "). Spawning on a random platform.");
+                spawnPlatform = platforms[Math.floor(Math.random() * platforms.length)];
+                 // This fallback is safe because we ensure platforms.length > 0 above.
+            }
+
+            // Update player position based on selected spawn platform
+            playerX = spawnPlatform.x + spawnPlatform.width / 2; // Spawn in the horizontal center of the platform
+            playerY = spawnPlatform.y - playerSize; // Spawn just above the platform
+            spawnGridCol = spawnPlatform.gridCol; // Store grid column of the platform's start
+            spawnGridRow = spawnPlatform.gridRow;
+            console.log("Player spawn coordinates:", {playerX, playerY}); // Log final spawn coordinates
+
+
+            // --- Place Finish Line ---
+            let finishPlatform;
+            do {
+                // Select a random platform to place the finish line on
+                finishPlatform = platforms[Math.floor(Math.random() * platforms.length)];
+                finishGridCol = finishPlatform.gridCol; // Note: This is the starting column of the platform run
+                finishGridRow = finishPlatform.gridRow;
+            } while (finishGridCol === spawnGridCol && finishGridRow === spawnGridRow); // Ensure finish is not on spawn platform
+
+            // Place finish line at the center of the chosen platform segment
+            finishX = finishPlatform.x + finishPlatform.width / 2 - finishSize / 2;
+            finishY = finishPlatform.y - finishSize; // Place just above the platform
+             console.log("Finish placed at:", {finishX, finishY}); // Log finish coordinates
+
+
+            // Reset player vertical velocity and jump state
+            playerDY = 0;
+            isJumping = false;
+            isFallingThrough = false; // Reset fall through flag on new level
+            wasInAir = false; // Reset air flag on new level
+        }
+
+        // Function to draw platforms as rectangles (fallback)
+        function drawRectPlatforms() {
+             ctx.fillStyle = 'black';
+             platforms.forEach(platform => {
+                 ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+             });
+        }
+
+        // Function to draw platforms as images
+        function drawImagePlatforms() {
+             platforms.forEach(platform => {
+                 // Draw the image, stretching it to fit the platform dimensions
+                 ctx.drawImage(platformImage, platform.x, platform.y, platform.width, platform.height);
+             });
+        }
+
+        // Initially set to draw images, will fallback if image fails to load
+        let drawPlatforms = drawImagePlatforms;
+
+        // Function to draw player as a circle (fallback)
+        function drawCirclePlayer() {
+            ctx.fillStyle = 'black';
+            ctx.beginPath();
+            ctx.arc(playerX, playerY, playerSize, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Function to draw player as an image
+        function drawImagePlayer() {
+            // Draw the image centered around the player's (playerX, playerY) coordinates
+            // The image is drawn from the top-left corner, so we subtract playerSize
+            // The image size is playerSize * 2 by playerSize * 2 to match the circle's diameter
+             ctx.drawImage(playerImage, playerX - playerSize, playerY - playerSize, playerSize * 2, playerSize * 2);
+        }
+
+        // Initially set to draw image, will fallback if image fails to load
+        let drawPlayer = drawImagePlayer;
+
+        // Function to draw finish line as a rectangle (fallback)
+        function drawRectFinish() {
+            ctx.fillStyle = '#555555'; // Dark grey fallback
+            ctx.fillRect(finishX, finishY, finishSize, finishSize);
+        }
+
+        // Function to draw finish line as an image
+        function drawImageFinish() {
+             // Draw the image at the finish line's position and size
+             ctx.drawImage(finishImage, finishX, finishY, finishSize, finishSize);
+        }
+
+         // Initially set to draw image, will fallback if image fails to load
+        let drawFinish = drawImageFinish;
+
+
+        // Function to draw all game elements
+        function draw() {
+            // Draw background image or fallback white background
+            if (isBackgroundLoaded) {
+                 ctx.drawImage(backgroundImage, 0, 0, canvas.width, canvas.height);
+            } else {
+                 ctx.fillStyle = 'white';
+                 ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+
+            // Draw platforms using the selected method (image or rectangle)
+            drawPlatforms();
+
+            // Draw player using the selected method (image or circle)
+            drawPlayer();
+
+            // Draw finish line using the selected method (image or rectangle)
+            drawFinish();
+        }
+
+        // Function to update game state
+        function update() {
+            // Store if the player was in the air before applying gravity
+            wasInAir = isJumping || playerDY !== 0;
+
+
+            // Apply gravity to player
+            playerDY += gravity;
+            playerY += playerDY;
+
+            // Apply horizontal movement based on key states
+            if (isLeftKeyPressed) {
+                playerX -= playerSpeed;
+            }
+            if (isRightKeyPressed) {
+                playerX += playerSpeed;
+            }
+
+            // Check for collision with BOTTOM canvas edge - Restart game and reset score if touching
+            if (playerY + playerSize > canvas.height) // Bottom edge
+             {
+                showMessage("Touched bottom edge! Restarting level.");
+                winCount = 0; // Reset score on loss
+                winCounterElement.textContent = 'Wins: ' + winCount; // Update display
+                animateWinCounter(); // Animate win counter on loss
+                generateLevel(); // Generate a new level
+                playSound(loseSound); // Play lose sound
+                // Player position is reset inside generateLevel
+                return; // Stop updating for this frame
+            }
+
+            // Prevent player from going off-screen horizontally and top (without restarting)
+            if (playerX - playerSize < 0) playerX = playerSize;
+            if (playerX + playerSize > canvas.width) playerX = canvas.width - playerSize;
+            if (playerY - playerSize < 0) playerY = playerSize; // Prevent going off top
+
+
+            // Collision detection with platforms
+            let onPlatform = false; // Track if the player is currently on *any* platform
+            platforms.forEach(platform => {
+                // Check for overlap on both axes
+                if (playerX + playerSize > platform.x &&
+                    playerX - playerSize < platform.x + platform.width &&
+                    playerY + playerSize > platform.y &&
+                    playerY - playerSize < platform.y + platform.height) {
+
+                    // Collision detected. Check if landing on top of the platform AND not trying to fall through
+                    if (playerDY > 0 && playerY + playerSize - playerDY <= platform.y && !isFallingThrough) {
+                        playerY = platform.y - playerSize; // Place player on top
+                        playerDY = 0; // Stop vertical movement
+                        isJumping = false; // Player is grounded
+                        onPlatform = true; // Player is on this platform
+
+                        // Play land sound if the player was just in the air
+                        if (wasInAir) {
+                            playSound(landSound);
+                        }
+                    }
+                    // Simple side/bottom collision (optional, can be improved) - Only if not falling through
+                    else if (!isFallingThrough) {
+                         if (playerDY < 0 && playerY - playerSize + playerDY >= platform.y + platform.height) {
+                              // Hit bottom of platform
+                              playerY = platform.y + platform.height + playerSize;
+                              playerDY = 0;
+                         } else if (playerX < platform.x && playerX + playerSize > platform.x) {
+                              // Hit left side of platform
+                              playerX = platform.x - playerSize;
+                         } else if (playerX > platform.x + platform.width && playerX - playerSize < platform.x + platform.width) {
+                              // Hit right side of platform
+                              playerX = platform.x + platform.width + playerSize;
+                         }
+                    }
+                }
+            });
+
+            // If player was falling through and is now not on any platform, reset the flag
+            if (isFallingThrough && !onPlatform) {
+                 isFallingThrough = false;
+            }
+
+            // Update wasInAir flag if not on any platform
+            if (!onPlatform) {
+                wasInAir = true;
+            } else {
+                wasInAir = false;
+            }
+
+            // --- Walking Sound Logic (Repeated Playback) ---
+            const currentlyWalking = (isLeftKeyPressed || isRightKeyPressed) && !isJumping && playerDY === 0;
+            const currentTime = Date.now(); // Get current timestamp
+
+            if (currentlyWalking) {
+                // If walking and enough time has passed since the last footstep
+                if (currentTime - lastFootstepTime > footstepInterval) {
+                    playSound(walkSound); // Play a single footstep sound
+                    lastFootstepTime = currentTime; // Update the timestamp
+                }
+            } else {
+                // If not walking, reset the last footstep time to allow a step immediately when walking resumes
+                 lastFootstepTime = currentTime; // Set to current time to prevent immediate step on resume
+            }
+            // Removed the logic that paused/reset the walkSound based on isWalkingSoundPlaying
+            // isWalkingSoundPlaying flag is no longer needed for this playback method
+            // --- End Walking Sound Logic ---
+
+
+            // Collision detection with finish line
+            if (playerX + playerSize > finishX &&
+                playerX - finishSize < finishX + finishSize &&
+                playerY + playerSize > finishY &&
+                playerY - finishSize < finishY + finishSize) {
+                // Player reached the finish line
+                console.log("Player reached finish line. Attempting to play level complete sound."); // Added log
+
+                showMessage("Level Complete!"); // Simple win message
+
+                // Increment win counter and update display
+                winCount++;
+                winCounterElement.textContent = 'Wins: ' + winCount;
+                animateWinCounter(); // Animate win counter on win
+
+                // Play the level complete sound effect by creating a new instance
+                const tempDingSound = new Audio(levelCompleteSoundUrl);
+                tempDingSound.volume = 0.3; // Set volume
+                tempDingSound.play().catch(e => console.error("Error playing level complete sound:", e));
+
+
+                // The win sound (background music) continues looping.
+                // playSound(winSound); // Removed this call as winSound is background music now.
+
+                // Generate a new level
+                generateLevel();
+                // Player position is reset inside generateLevel
+
+                // Exit pointer lock before restarting level (optional, but prevents issues)
+                if (document.pointerLockElement === canvas) {
+                   // document.exitPointerLock(); // Decided to keep pointer lock for smoother transition
+                }
+
+                return; // Stop updating for this frame
+            }
+        }
+
+        // Handle keyboard input - Key Down (press)
+        document.addEventListener('keydown', (event) => {
+             // Only process input if pointer is locked
+            if (document.pointerLockElement === canvas) {
+                switch (event.key) {
+                    case 'ArrowLeft':
+                        isLeftKeyPressed = true;
+                        break;
+                    case 'ArrowRight':
+                        isRightKeyPressed = true;
+                        break;
+                    case 'ArrowUp':
+                        if (!isJumping) {
+                            playerDY = -12; // Jump strength
+                            isJumping = true;
+                            playSound(jumpSound); // Play jump sound
+                        }
+                        break;
+                    case 'ArrowDown':
+                         // Only allow falling through if on a platform and not already falling through
+                         if (!isJumping && playerDY === 0) {
+                             isFallingThrough = true;
+                             // Apply a small downward push to ensure they leave the platform
+                             playerDY = 1;
+                         }
+                         break;
+                }
+            }
+        });
+
+        // Handle keyboard input - Key Up (release)
+        document.addEventListener('keyup', (event) => {
+             // Only process input if pointer is locked
+            if (document.pointerLockElement === canvas) {
+                switch (event.key) {
+                    case 'ArrowLeft':
+                        isLeftKeyPressed = false;
+                        break;
+                    case 'ArrowRight':
+                        isRightKeyPressed = false;
+                        break;
+                    case 'ArrowDown':
+                         // Reset the falling through flag when the key is released
+                         // This prevents getting stuck in fall-through mode
+                         isFallingThrough = false;
+                         break;
+                }
+            }
+        });
+
+        // Pointer Lock API
+        // Reinstated click listener for pointer lock
+        canvas.addEventListener('click', () => {
+            // Attempt to play and immediately pause all sounds to unlock audio playback
+            // This is done to satisfy browser autoplay policies.
+            // Removed this as it's now handled on pointerlockchange
+            /*
+            jumpSound.play().then(() => jumpSound.pause()).catch(e => console.warn("Audio unlock failed for jumpSound:", e));
+            landSound.play().then(() => landSound.pause()).catch(e => console.warn("Audio unlock failed for landSound:", e));
+            winSound.play().then(() => winSound.pause()).catch(e => console.warn("Audio unlock failed for winSound:", e));
+            loseSound.play().then(() => loseSound.pause()).catch(e => console.warn("Audio unlock failed for loseSound:", e));
+            */
+
+            canvas.requestPointerLock();
+        });
+
+        // Removed automatic Pointer Lock on mouse enter/leave
+
+
+        // Optional: Add listeners for pointer lock change and error
+        document.addEventListener('pointerlockchange', () => {
+            if (document.pointerLockElement !== canvas) {
+                // Pointer lock lost, you might want to pause the game or show a message
+                 isLeftKeyPressed = false; // Stop movement if lock is lost
+                 isRightKeyPressed = false;
+                 showMessage("Pointer lock lost. Mouse unlocked."); // Updated message
+                 // Pause background music when pointer lock is lost
+                 winSound.pause();
+                 // Stop and reset walking sound if pointer lock is lost
+                 // isWalkingSoundPlaying flag is no longer used for this logic
+                 walkSound.pause();
+                 walkSound.currentTime = 0;
+                 lastFootstepTime = 0; // Reset timer when lock is lost
+
+
+            } else {
+                 // Pointer lock gained - start background music
+                 showMessage("Pointer lock gained. Mouse locked."); // Updated message
+                 playSound(winSound); // Start background music when pointer locks
+                 lastFootstepTime = Date.now(); // Initialize timer when lock is gained
+            }
+        });
+
+        document.addEventListener('pointerlockerror', () => {
+            console.error("Pointer lock failed");
+            showMessage("Pointer lock failed. Game may not respond to input.");
+        });
+
+
+        // Handle window resizing (optional, but good for full screen)
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            // Note: This doesn't regenerate the level on resize, only adjusts canvas size.
+            // For a full regeneration on resize, you'd call generateLevel() here,
+            // but that might be jarring.
+             showMessage("Window resized. Game canvas updated.");
+        });
+
+
+        // Game loop
+        function gameLoop() {
+            // Only update game state if pointer is locked
+            if (document.pointerLockElement === canvas) {
+                update(); // Update game state
+            }
+            draw();   // Draw everything (always draw even if not updating)
+            requestAnimationFrame(gameLoop); // Request the next frame
+        }
+
+        // --- Game Initialization ---
+        // The game will start automatically once all images have finished loading
+        // via the imageLoaded() function.
+
+    </script>
+
+</body>
+</html>
