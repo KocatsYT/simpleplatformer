@@ -109,8 +109,7 @@
 <body>
 
     <canvas id="gameCanvas"></canvas>
-    <div id="winCounter">Wins: 0</div>
-    <div id="messageArea"></div>
+    <div id="winCounter">Level: 1</div> <div id="messageArea"></div>
 
     <script>
         const canvas = document.getElementById('gameCanvas');
@@ -124,10 +123,10 @@
 
         // --- Image Loading ---
         let imagesLoaded = 0;
-        const totalImages = 4; // We now need to load 4 images (background, platform, player, finish)
+        const totalImages = 5; // We now need to load 5 images (background, platform, player, finish, spike)
 
         const backgroundImage = new Image();
-        // Corrected background image URL
+        // Corrected background image URL (fixed typo)
         backgroundImage.src = 'https://pixeljoint.com/files/icons/full/sky__r1623380481.png';
         let isBackgroundLoaded = false; // Flag to track if background loaded
         backgroundImage.onload = () => {
@@ -169,6 +168,21 @@
             imageLoaded(); // Still count as loaded to potentially start game
         };
 
+        // Spike image (new)
+        const spikeImage = new Image();
+        // Using the new direct URL provided by the user
+        spikeImage.src = 'https://www.nicepng.com/png/full/228-2287658_pixel-art-maker-spikes-pixel-art.png';
+        let isSpikeImageLoaded = false; // Flag to track if spike image loaded
+        spikeImage.onload = () => {
+            isSpikeImageLoaded = true;
+            imageLoaded();
+        };
+        spikeImage.onerror = () => {
+            console.error("Failed to load spike image. Using fallback drawing.");
+            isSpikeImageLoaded = false; // Ensure flag is false on error
+            imageLoaded(); // Still count as loaded to potentially start game
+        };
+
 
         function imageLoaded() {
             imagesLoaded++;
@@ -183,26 +197,24 @@
 
         // --- Sound Effects (8-bit) ---
         // Using 8-bit sound effects from OpenGameArt.org and Kenney.nl
-        // Reverted sound URLs to original OpenGameArt links where they were before spike changes,
-        // except for the level complete sound which uses a different OpenGameArt ding.
         const jumpSound = new Audio('https://opengameart.org/sites/default/files/sfx-jump.wav'); // Reverted to OpenGameArt
-        jumpSound.volume = 0.3; // Make jump sound quieter
-        const landSound = new Audio('https://opengameart.org/sites/default/files/sfx-land.wav'); // From OpenGameArt.org (kept)
-        landSound.volume = 0.3; // Make land sound quieter
-        // Changed winSound (background music) to a different 8-bit track
-        const winSound = new Audio('https://opengameart.org/sites/default/files/8bit%20attempt.ogg'); // From OpenGameArt.org (kept, background music)
-        winSound.loop = true; // Set the win sound to loop
-        winSound.volume = 0.3; // Make background music quieter
-        const loseSound = new Audio('https://opengameart.org/sites/default/files/vgdeathsound.wav'); // Reverted to OpenGameArt
-        loseSound.volume = 0.3; // Make lose sound quieter
-        // New sound effect for completing a level (using OpenGameArt ding as requested)
+        jumpSound.volume = 0.3; // Sound effect volume
+        const landSound = new Audio('https://opengameart.org/sites/default/files/sfx-land.wav'); // From OpenGameart.org (kept)
+        landSound.volume = 0.3; // Sound effect volume
+        // Background music (added back)
+        const backgroundMusic = new Audio('https://opengameart.org/sites/default/files/8bit%20attempt.ogg'); // Added back
+        backgroundMusic.loop = true; // Set to loop
+        backgroundMusic.volume = 0.1; // Background music volume (adjusted)
+        const loseSound = new Audio('https://opengameart.org/sites/default/files/vgdeathsound.wav'); // Reverted to OpenGameart
+        loseSound.volume = 0.3; // Sound effect volume
+        // New sound effect for completing a level (using OpenGameart ding as requested)
         // We will create a NEW Audio object for this sound each time it's played for reliability.
         const levelCompleteSoundUrl = 'https://opengameart.org/sites/default/files/sfx_sounds_collect1.wav'; // Store URL
 
 
         // Added walking sound effect (will be played repeatedly, not looped by the Audio object)
-        const walkSound = new Audio('https://opengameart.org/sites/default/files/sfx-footstep.wav'); // Reverted to OpenGameArt
-        walkSound.volume = 0.3; // Make walking sound quieter
+        const walkSound = new Audio('https://opengameart.org/sites/default/files/sfx-footstep.wav'); // Reverted to OpenGameart
+        walkSound.volume = 0.3; // Sound effect volume
         // Removed walkSound.loop = true;
 
         // Variables for controlling repeated walking sound playback
@@ -223,10 +235,21 @@
         }
         // --- End Sound Effects ---
 
+        // --- Background Music Looping Fix ---
+        // Add an event listener to explicitly restart the music if it ends while looping is true
+        backgroundMusic.addEventListener('ended', () => {
+            if (backgroundMusic.loop) {
+                backgroundMusic.currentTime = 0; // Optional: rewind to start
+                backgroundMusic.play().catch(e => console.error("Error restarting background music loop:", e));
+            }
+        });
+        // --- End Background Music Looping Fix ---
+
 
         // Win Counter (resets on page refresh and when losing)
         let winCount = 0; // Initialize to 0 on every page load
-        winCounterElement.textContent = 'Wins: ' + winCount;
+        winCounterElement.textContent = 'Level: ' + (winCount + 1); // Changed label and added +1
+
 
         // Player properties
         const playerSize = 15; // This now represents the radius for collision/positioning
@@ -248,10 +271,10 @@
         // Platforms
         const platforms = [];
 
-        // Spikes (removed)
-        // const spikes = [];
-        // const spikeSize = 20;
-        // const spikeProbability = 0.1;
+        // Spikes (re-added and modified generation)
+        const spikes = [];
+        const spikeSize = 20; // Size for spike drawing and collision
+        const spikeProbability = 0.2; // Halved probability of placing a spike in a potential slot
 
 
         // Grid properties
@@ -275,6 +298,13 @@
 
         let spawnGridCol;
         let spawnGridRow;
+        let finishPlatform = null; // Variable to store the chosen finish platform
+        let spawnPlatform = null; // Variable to store the chosen spawn platform
+
+
+        // Flag to pause game logic during delay
+        let isGamePausedForDelay = false;
+
 
         // Function to display messages temporarily with animation
         function showMessage(message) {
@@ -309,19 +339,23 @@
         }
 
 
-        // Function to generate random platforms and finish line on a grid (connected tiles)
+        // Function to generate random platforms, finish line, and spikes on a grid (connected tiles)
         function generateLevel() {
             // Removed the code that stops and resets the win sound here.
             // The win sound will now continue looping when a new level is generated.
 
             platforms.length = 0; // Clear existing platforms
-            // spikes.length = 0; // Clear existing spikes (removed)
+            spikes.length = 0; // Clear existing spikes (re-added)
+            finishPlatform = null; // Reset finish platform variable
+            spawnPlatform = null; // Reset spawn platform variable
+            console.log("Generating new level. Platforms and spikes arrays cleared."); // Log level generation start
+
 
             // Calculate grid cell dimensions
             gridCellWidth = canvas.width / gridCols;
             gridCellHeight = canvas.height / gridRows;
 
-            // Generate platforms based on the grid (connected tiles)
+            // --- 1. Generate Platforms ---
             for (let row = 0; row < gridRows; row++) {
                 let currentPlatformX = -1; // Track the start of a potential platform run
                 let currentPlatformCol = -1;
@@ -354,18 +388,6 @@
                                     gridRow: row // Store grid row of the run
                                 };
                                 platforms.push(newPlatform);
-
-                                // Add spikes on top of this platform segment with a probability (removed)
-                                // if (Math.random() < spikeProbability) {
-                                //      spikes.push({
-                                //           x: newPlatform.x + newPlatform.width / 2 - spikeSize / 2, // Center spike on platform segment
-                                //           y: newPlatform.y - spikeSize, // Place spike just above platform
-                                //           width: spikeSize,
-                                //           height: spikeSize,
-                                //           gridCol: newPlatform.gridCol, // Store grid col of the platform start
-                                //           gridRow: newPlatform.gridRow // Store grid row of the platform
-                                //      });
-                                // }
                             }
                             currentPlatformX = -1; // Reset run tracker
                             currentPlatformCol = -1;
@@ -387,18 +409,6 @@
                              gridRow: row
                          };
                          platforms.push(newPlatform);
-
-                          // Add spikes on top of this platform segment with a probability (removed)
-                         // if (Math.random() < spikeProbability) {
-                         //      spikes.push({
-                         //           x: newPlatform.x + newPlatform.width / 2 - spikeSize / 2, // Center spike on platform segment
-                         //           y: newPlatform.y - spikeSize, // Place spike just above platform
-                         //           width: spikeSize,
-                         //           height: spikeSize,
-                         //           gridCol: newPlatform.gridCol, // Store grid col of the platform start
-                         //           gridRow: newPlatform.gridRow // Store grid row of the platform
-                         //      });
-                         // }
                      }
                 }
             }
@@ -422,11 +432,9 @@
              }
 
 
-            // --- Place Spawn Near Top ---
+            // --- 2. Place Spawn Near Top ---
             const maxSpawnRow = 2; // Consider platforms in rows 0, 1, and 2 for spawning
             const topPlatforms = platforms.filter(platform => platform.gridRow <= maxSpawnRow);
-
-            let spawnPlatform;
 
             // Select a random platform from the top platforms, or fallback to any platform if none found at the top
             if (topPlatforms.length > 0) {
@@ -447,19 +455,112 @@
             console.log("Player spawn coordinates:", {playerX, playerY}); // Log final spawn coordinates
 
 
-            // --- Place Finish Line ---
-            let finishPlatform;
+            // --- 3. Place Finish Line ---
             do {
                 // Select a random platform to place the finish line on
                 finishPlatform = platforms[Math.floor(Math.random() * platforms.length)];
                 finishGridCol = finishPlatform.gridCol; // Note: This is the starting column of the platform run
                 finishGridRow = finishPlatform.gridRow;
-            } while (finishGridCol === spawnGridCol && finishGridRow === spawnGridRow); // Ensure finish is not on spawn platform
+            } while (finishPlatform === spawnPlatform); // Ensure finish is not on spawn platform
 
             // Place finish line at the center of the chosen platform segment
             finishX = finishPlatform.x + finishPlatform.width / 2 - finishSize / 2;
             finishY = finishPlatform.y - finishSize; // Place just above the platform
              console.log("Finish placed at:", {finishX, finishY}); // Log finish coordinates
+
+
+            // --- 4. Generate Spikes AFTER placing Finish Line and identifying Spawn ---
+            // Spikes array was cleared at the beginning of the function
+            console.log("Generating spikes after placing finish line and identifying spawn."); // Log spike generation start
+
+            platforms.forEach(platform => {
+                // ONLY add spikes if this platform is NOT the finish platform
+                if (platform === finishPlatform) {
+                    console.log("Skipping spike generation on finish platform."); // Log when skipping finish platform
+                    return; // Skip this platform
+                }
+
+                // Handle spike generation specifically for the spawn platform
+                if (platform === spawnPlatform) {
+                    console.log("Generating spikes on spawn platform (max 2, edges only).");
+                    let spikesOnSpawn = 0;
+                    const numSpikeSlots = Math.floor(platform.width / spikeSize);
+
+                    // Try placing spike on the leftmost slot
+                    if (numSpikeSlots > 0 && Math.random() < spikeProbability && spikesOnSpawn < 2) {
+                         const spikeSlotX = platform.x; // Leftmost edge
+                         const spikeSlotY = platform.y - spikeSize;
+                         spikes.push({ x: spikeSlotX, y: spikeSlotY, width: spikeSize, height: spikeSize, gridRow: platform.gridRow });
+                         spikesOnSpawn++;
+                         // console.log("Spike generated on spawn platform (left).");
+                    }
+
+                    // Try placing spike on the rightmost slot (only if there's more than one slot)
+                    if (numSpikeSlots > 1 && Math.random() < spikeProbability && spikesOnSpawn < 2) {
+                         const spikeSlotX = platform.x + (numSpikeSlots - 1) * spikeSize; // Rightmost edge
+                         const spikeSlotY = platform.y - spikeSize;
+                         spikes.push({ x: spikeSlotX, y: spikeSlotY, width: spikeSize, height: spikeSize, gridRow: platform.gridRow });
+                         spikesOnSpawn++;
+                         // console.log("Spike generated on spawn platform (right).");
+                    }
+
+                } else {
+                    // Handle spike generation for regular platforms (original logic)
+                    let consecutiveSpikes = 0;
+                    const numSpikeSlots = Math.floor(platform.width / spikeSize); // Number of potential spike positions
+                    for (let i = 0; i < numSpikeSlots; i++) {
+                        const spikeSlotX = platform.x + i * spikeSize;
+                        const spikeSlotY = platform.y - spikeSize; // Place spike just above platform
+
+                        // Decide whether to place a spike in this slot, respecting the consecutive limit
+                        let placeSpike = false;
+                        if (consecutiveSpikes < 3) {
+                            if (Math.random() < spikeProbability) { // Use the updated spikeProbability (0.2)
+                                placeSpike = true;
+                            }
+                        }
+
+                        if (placeSpike) {
+                            const newSpike = {
+                                x: spikeSlotX,
+                                y: spikeSlotY,
+                                width: spikeSize,
+                                height: spikeSize,
+                                gridRow: platform.gridRow // Store grid row of the platform they are on.
+                            };
+                            spikes.push(newSpike);
+                            consecutiveSpikes++;
+                            // console.log("Spike generated at:", {x: newSpike.x, y: newSpike.y, gridRow: newSpike.gridRow}); // Keep log for debugging
+                        } else {
+                            // If no spike was placed, reset the consecutive counter
+                            consecutiveSpikes = 0;
+                        }
+                    }
+                }
+            });
+
+            console.log("Finished spike generation. Total spikes:", spikes.length); // Log total spikes generated
+
+
+            // --- 5. Check if Player Spawns on a Spike ---
+            // This check is still needed because random placement on edges might still overlap player start depending on size.
+            let spawnOnSpike = false;
+            spikes.forEach(spike => {
+                 // Check for collision between player's initial position and spike
+                 // Using a simplified check assuming playerSize is roughly spikeSize / 2 for centering
+                 if (playerX > spike.x &&
+                     playerX < spike.x + spike.width &&
+                     playerY + playerSize > spike.y && // Check bottom of player against top of spike
+                     playerY - playerSize < spike.y + spike.height) { // Check top of player against bottom of spike
+                     spawnOnSpike = true;
+                 }
+            });
+
+            if (spawnOnSpike) {
+                 console.warn("Player spawned on a spike! Regenerating level."); // Log regeneration
+                 generateLevel(); // Regenerate the level if spawn is on a spike
+                 return; // Exit this call to generateLevel
+            }
 
 
             // Reset player vertical velocity and jump state
@@ -522,6 +623,48 @@
          // Initially set to draw image, will fallback if image fails to load
         let drawFinish = drawImageFinish;
 
+        // Function to draw spikes (image or three pointy spikes fallback)
+        function drawSpikes() {
+            // console.log("drawSpikes called. Number of spikes:", spikes.length); // Removed frequent log
+            if (isSpikeImageLoaded) {
+                // Draw spike image
+                spikes.forEach(spike => {
+                    ctx.drawImage(spikeImage, spike.x, spike.y, spike.width, spike.height);
+                });
+            } else {
+                // Draw three pointy spikes (fallback)
+                ctx.fillStyle = 'black'; // Color for spikes
+                spikes.forEach(spike => {
+                    const sx = spike.x;
+                    const sy = spike.y;
+                    const sw = spike.width;
+                    const sh = spike.height;
+
+                    // Draw three triangles side-by-side
+                    ctx.beginPath();
+                    ctx.moveTo(sx, sy + sh);
+                    ctx.lineTo(sx + sw/6, sy);
+                    ctx.lineTo(sx + sw/3, sy + sh);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    ctx.beginPath();
+                    ctx.moveTo(sx + sw/3, sy + sh);
+                    ctx.lineTo(sx + sw/2, sy);
+                    ctx.lineTo(sx + 2*sw/3, sy + sh);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    ctx.beginPath();
+                    ctx.moveTo(sx + 2*sw/3, sy + sh);
+                    ctx.lineTo(sx + 5*sw/6, sy);
+                    ctx.lineTo(sx + sw, sy + sh);
+                    ctx.closePath();
+                    ctx.fill();
+                });
+            }
+        }
+
 
         // Function to draw all game elements
         function draw() {
@@ -537,7 +680,10 @@
             // Draw platforms using the selected method (image or rectangle)
             drawPlatforms();
 
-            // Draw player using the selected method (image or circle)
+            // Draw spikes
+            drawSpikes();
+
+            // Draw player using the selected method (image or rectangle)
             drawPlayer();
 
             // Draw finish line using the selected method (image or rectangle)
@@ -546,6 +692,11 @@
 
         // Function to update game state
         function update() {
+            // Only update game state if the game is not paused for a delay
+            if (isGamePausedForDelay) {
+                return; // Skip update logic if paused
+            }
+
             // Store if the player was in the air before applying gravity
             wasInAir = isJumping || playerDY !== 0;
 
@@ -565,13 +716,20 @@
             // Check for collision with BOTTOM canvas edge - Restart game and reset score if touching
             if (playerY + playerSize > canvas.height) // Bottom edge
              {
-                showMessage("Touched bottom edge! Restarting level.");
+                showMessage("Game Over!"); // Changed message
                 winCount = 0; // Reset score on loss
-                winCounterElement.textContent = 'Wins: ' + winCount; // Update display
+                winCounterElement.textContent = 'Level: ' + (winCount + 1); // Changed label
                 animateWinCounter(); // Animate win counter on loss
-                generateLevel(); // Generate a new level
                 playSound(loseSound); // Play lose sound
-                // Player position is reset inside generateLevel
+
+                isLeftKeyPressed = false; // Reset key state
+                isRightKeyPressed = false; // Reset key state
+                isGamePausedForDelay = true; // Pause game logic
+                setTimeout(() => {
+                    generateLevel(); // Generate a new level after delay
+                    isGamePausedForDelay = false; // Unpause game logic
+                }, 1000); // 1 second delay
+
                 return; // Stop updating for this frame
             }
 
@@ -588,7 +746,7 @@
                 if (playerX + playerSize > platform.x &&
                     playerX - playerSize < platform.x + platform.width &&
                     playerY + playerSize > platform.y &&
-                    playerY - playerSize < platform.y + platform.height) {
+                    playerY - spikeSize < platform.y + platform.height) { // Corrected collision check here
 
                     // Collision detected. Check if landing on top of the platform AND not trying to fall through
                     if (playerDY > 0 && playerY + playerSize - playerDY <= platform.y && !isFallingThrough) {
@@ -624,12 +782,18 @@
                  isFallingThrough = false;
             }
 
-            // Update wasInAir flag if not on any platform
+            // --- Revised Fix: Update isJumping and wasInAir based on whether the player is on a platform ---
             if (!onPlatform) {
-                wasInAir = true;
+                // If not on a platform, the player is in the air.
+                isJumping = true; // Set isJumping to true when airborne
+                // wasInAir is already checked at the start of update using isJumping or playerDY
             } else {
-                wasInAir = false;
+                // If on a platform, the player is grounded.
+                isJumping = false; // Ensure isJumping is false when grounded
+                wasInAir = false; // Ensure wasInAir is false when grounded
             }
+            // --- End Revised Fix ---
+
 
             // --- Walking Sound Logic (Repeated Playback) ---
             const currentlyWalking = (isLeftKeyPressed || isRightKeyPressed) && !isJumping && playerDY === 0;
@@ -649,6 +813,32 @@
             // isWalkingSoundPlaying flag is no longer needed for this playback method
             // --- End Walking Sound Logic ---
 
+            // --- Spike Collision Detection --- (re-added)
+            spikes.forEach(spike => {
+                if (playerX + playerSize > spike.x &&
+                    playerX - playerSize < spike.x + spike.width &&
+                    playerY + playerSize > spike.y &&
+                    playerY - spikeSize < spike.y + spike.height) { // Use spike.y - spikeSize for top collision
+                    // Collision with a spike - Player loses
+                    showMessage("Hit a spike!"); // Changed message
+                    winCount = 0; // Reset score on loss
+                    winCounterElement.textContent = 'Level: ' + (winCount + 1); // Changed label
+                    animateWinCounter(); // Animate win counter on loss
+                    playSound(loseSound); // Play lose sound
+
+                    isLeftKeyPressed = false; // Reset key state
+                    isRightKeyPressed = false; // Reset key state
+                    isGamePausedForDelay = true; // Pause game logic
+                    setTimeout(() => {
+                         generateLevel(); // Generate a new level after delay
+                         isGamePausedForDelay = false; // Unpause game logic
+                    }, 1000); // 1 second delay
+
+                    return; // Stop processing collisions for this frame
+                }
+            });
+            // --- End Spike Collision Detection ---
+
 
             // Collision detection with finish line
             if (playerX + playerSize > finishX &&
@@ -662,7 +852,7 @@
 
                 // Increment win counter and update display
                 winCount++;
-                winCounterElement.textContent = 'Wins: ' + winCount;
+                winCounterElement.textContent = 'Level: ' + (winCount + 1); // Changed label
                 animateWinCounter(); // Animate win counter on win
 
                 // Play the level complete sound effect by creating a new instance
@@ -674,14 +864,14 @@
                 // The win sound (background music) continues looping.
                 // playSound(winSound); // Removed this call as winSound is background music now.
 
-                // Generate a new level
-                generateLevel();
-                // Player position is reset inside generateLevel
+                isLeftKeyPressed = false; // Reset key state
+                isRightKeyPressed = false; // Reset key state
+                isGamePausedForDelay = true; // Pause game logic
+                setTimeout(() => {
+                    generateLevel(); // Generate a new level after delay
+                    isGamePausedForDelay = false; // Unpause game logic
+                }, 1000); // 1 second delay
 
-                // Exit pointer lock before restarting level (optional, but prevents issues)
-                if (document.pointerLockElement === canvas) {
-                   // document.exitPointerLock(); // Decided to keep pointer lock for smoother transition
-                }
 
                 return; // Stop updating for this frame
             }
@@ -689,8 +879,8 @@
 
         // Handle keyboard input - Key Down (press)
         document.addEventListener('keydown', (event) => {
-             // Only process input if pointer is locked
-            if (document.pointerLockElement === canvas) {
+             // Only process input if pointer is locked AND game is not paused
+            if (document.pointerLockElement === canvas && !isGamePausedForDelay) {
                 switch (event.key) {
                     case 'ArrowLeft':
                         isLeftKeyPressed = true;
@@ -699,7 +889,8 @@
                         isRightKeyPressed = true;
                         break;
                     case 'ArrowUp':
-                        if (!isJumping) {
+                        // Only allow jump if not already jumping and not falling through a platform
+                        if (!isJumping && !isFallingThrough) {
                             playerDY = -12; // Jump strength
                             isJumping = true;
                             playSound(jumpSound); // Play jump sound
@@ -719,8 +910,8 @@
 
         // Handle keyboard input - Key Up (release)
         document.addEventListener('keyup', (event) => {
-             // Only process input if pointer is locked
-            if (document.pointerLockElement === canvas) {
+             // Only process input if pointer is locked AND game is not paused
+            if (document.pointerLockElement === canvas && !isGamePausedForDelay) {
                 switch (event.key) {
                     case 'ArrowLeft':
                         isLeftKeyPressed = false;
@@ -740,21 +931,21 @@
         // Pointer Lock API
         // Reinstated click listener for pointer lock
         canvas.addEventListener('click', () => {
-            // Attempt to play and immediately pause all sounds to unlock audio playback
-            // This is done to satisfy browser autoplay policies.
-            // Removed this as it's now handled on pointerlockchange
-            /*
-            jumpSound.play().then(() => jumpSound.pause()).catch(e => console.warn("Audio unlock failed for jumpSound:", e));
-            landSound.play().then(() => landSound.pause()).catch(e => console.warn("Audio unlock failed for landSound:", e));
-            winSound.play().then(() => winSound.pause()).catch(e => console.warn("Audio unlock failed for winSound:", e));
-            loseSound.play().then(() => loseSound.pause()).catch(e => console.warn("Audio unlock failed for loseSound:", e));
-            */
+             // Only request pointer lock if the game is not paused for a delay
+             if (!isGamePausedForDelay) {
+                // Attempt to play and immediately pause all sounds to unlock audio playback
+                // This is done to satisfy browser autoplay policies.
+                // Removed this as it's now handled on pointerlockchange
+                /*
+                jumpSound.play().then(() => jumpSound.pause()).catch(e => console.warn("Audio unlock failed for jumpSound:", e));
+                landSound.play().then(() => landSound.pause()).catch(e => console.warn("Audio unlock failed for landSound:", e));
+                winSound.play().then(() => winSound.pause()).catch(e => console.warn("Audio unlock failed for winSound:", e));
+                loseSound.play().then(() => loseSound.pause()).catch(e => console.warn("Audio unlock failed for loseSound:", e));
+                */
 
-            canvas.requestPointerLock();
+                canvas.requestPointerLock();
+             }
         });
-
-        // Removed automatic Pointer Lock on mouse enter/leave
-
 
         // Optional: Add listeners for pointer lock change and error
         document.addEventListener('pointerlockchange', () => {
@@ -764,7 +955,7 @@
                  isRightKeyPressed = false;
                  showMessage("Pointer lock lost. Mouse unlocked."); // Updated message
                  // Pause background music when pointer lock is lost
-                 winSound.pause();
+                 backgroundMusic.pause(); // Pause music
                  // Stop and reset walking sound if pointer lock is lost
                  // isWalkingSoundPlaying flag is no longer used for this logic
                  walkSound.pause();
@@ -774,8 +965,7 @@
 
             } else {
                  // Pointer lock gained - start background music
-                 showMessage("Pointer lock gained. Mouse locked."); // Updated message
-                 playSound(winSound); // Start background music when pointer locks
+                 backgroundMusic.play().catch(e => console.error("Error playing background music:", e)); // Play music
                  lastFootstepTime = Date.now(); // Initialize timer when lock is gained
             }
         });
@@ -799,8 +989,8 @@
 
         // Game loop
         function gameLoop() {
-            // Only update game state if pointer is locked
-            if (document.pointerLockElement === canvas) {
+            // Only update game state if pointer is locked and game is not paused
+            if (document.pointerLockElement === canvas && !isGamePausedForDelay) {
                 update(); // Update game state
             }
             draw();   // Draw everything (always draw even if not updating)
